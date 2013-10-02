@@ -30,23 +30,47 @@
 #include <machine/cpu-features.h>
 #include <machine/asm.h>
 
-#define PLDOFFS	(10)
-#define PLDTHRESH (PLDOFFS)
-#define BBTHRESH (4096/64)
-#define PLDSIZE (64)
+/*
+ * These default settings are good for all Krait-based systems
+ * as of this writing, but they can be overridden in:
+ *   device/<vendor>/<board>/BoardConfig.mk
+ * by setting the following:
+ *   TARGET_USE_KRAIT_BIONIC_OPTIMIZATION := true
+ *   TARGET_USE_KRAIT_PLD_SET := true
+ *   TARGET_KRAIT_BIONIC_PLDOFFS := <pldoffset>
+ *   TARGET_KRAIT_BIONIC_PLDSIZE := <pldsize>
+ *   TARGET_KRAIT_BIONIC_PLDTHRESH := <pldthreshold>
+ *   TARGET_KRAIT_BIONIC_BBTHRESH := <bbthreshold>
+ */
 
+#ifndef PLDOFFS
+#define PLDOFFS	(10)
+#endif
+#ifndef PLDTHRESH
+#define PLDTHRESH (PLDOFFS)
+#endif
+#ifndef BBTHRESH
+#define BBTHRESH (4096/64)
+#endif
 #if (PLDOFFS < 1)
 #error Routine does not support offsets less than 1
 #endif
-
 #if (PLDTHRESH < PLDOFFS)
 #error PLD threshold must be greater than or equal to the PLD offset
 #endif
-
+#ifndef PLDSIZE
+#define PLDSIZE	(64)
+#endif
 	.text
 	.fpu    neon
 
-.L_memcpy_base:
+ENTRY(MEMCPY_BASE)
+MEMCPY_BASE_ALIGNED:
+       // .cfi_startproc
+	.save {r0, r9, r10, lr}
+       // .cfi_def_cfa_offset 8
+	//.cfi_rel_offset r0, 0
+	//.cfi_rel_offset lr, 4
 	cmp	r2, #4
 	blt	.L_neon_lt4
 	cmp	r2, #16
@@ -127,7 +151,6 @@
 	bic	r10, #0x3F
 	sub	r12, r12, #PLDOFFS
 	ldr	r3, [r10, #(-1*PLDSIZE)]
-
 .L_neon_copy_64_loop_outer:
 	vld1.32	{q0, q1}, [r1]!
 	vld1.32	{q2, q3}, [r1]!
@@ -137,13 +160,12 @@
 	vst1.32	{q2, q3}, [r0]!
 	add	r10, #64
 	bne	.L_neon_copy_64_loop_outer
-
 .L_neon_pop_before_nopld:
 	mov	r12, lr, lsr #6
 	pop	{r9, r10}
-	.cfi_adjust_cfa_offset -8
 	.cfi_restore r9
 	.cfi_restore r10
+	.cfi_adjust_cfa_offset -8
 
 .L_neon_copy_64_loop_nopld:
 	vld1.32	{q8, q9}, [r1]!
@@ -153,31 +175,30 @@
 	vst1.32	{q10, q11}, [r0]!
 	bne	.L_neon_copy_64_loop_nopld
 	ands	r2, r2, #0x3f
+	.cfi_restore r0
+	.cfi_adjust_cfa_offset -4
 	beq	.L_neon_exit
-
 .L_neon_copy_32_a:
 	movs	r3, r2, lsl #27
 	bcc	.L_neon_16
 	vld1.32	{q0,q1}, [r1]!
 	vst1.32	{q0,q1}, [r0]!
-
 .L_neon_16:
 	bpl	.L_neon_lt16
 	vld1.32	{q8}, [r1]!
 	vst1.32	{q8}, [r0]!
 	ands	r2, r2, #0x0f
 	beq	.L_neon_exit
-
 .L_neon_lt16:
 	movs	r3, r2, lsl #29
-	bcc	1f
-	vld1.8	{d0}, [r1]!
-	vst1.8	{d0}, [r0]!
-1:
-	bge	.L_neon_lt4
-	vld4.8	{d0[0], d1[0], d2[0], d3[0]}, [r1]!
-	vst4.8	{d0[0], d1[0], d2[0], d3[0]}, [r0]!
-
+	itttt	cs
+	ldrcs	r3, [r1], #4
+	strcs	r3, [r0], #4
+	ldrcs	r3, [r1], #4
+	strcs	r3, [r0], #4
+	itt	mi
+	ldrmi	r3, [r1], #4
+	strmi	r3, [r0], #4
 .L_neon_lt4:
 	movs	r2, r2, lsl #31
 	itt	cs
@@ -186,6 +207,8 @@
 	itt	mi
 	ldrbmi	r3, [r1]
 	strbmi	r3, [r0]
-
 .L_neon_exit:
-	pop	{r0, pc}
+	pop	{r0, lr}
+	bx	lr
+        //.cfi_endproc
+END(MEMCPY_BASE)
