@@ -582,10 +582,7 @@ ifneq ($(TARGET_USES_LOGD),false)
 libc_common_cflags += -DTARGET_USES_LOGD
 endif
 
-use_clang := $(USE_CLANG_PLATFORM_BUILD)
-ifeq ($(use_clang),)
-  use_clang := true
-endif
+  use_clang := false
 
 # Try to catch typical 32-bit assumptions that break with 64-bit pointers.
 libc_common_cflags += \
